@@ -1,10 +1,14 @@
 """Subprocess executor for running async tasks with context."""
+# Copyright 2026 Udi Fuchs
+
+from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import functools
 import types
 from collections.abc import Callable
-from typing import ClassVar, cast
+from typing import Any, ClassVar, cast
 
 PICKLABLE = int, float, complex, str, bytes, bytearray
 
@@ -22,7 +26,7 @@ class _Worker:
     @staticmethod
     def _register_instance(key: str, instance: object) -> None:
         if key in _Worker._obj_dict:
-            raise Exception(f"Worker already contains {key}")
+            raise KeyError(f"Worker already contains {key}")
         _Worker._obj_dict[key] = instance
 
     @staticmethod
@@ -43,55 +47,41 @@ class _Worker:
         return cast(type, new_instance.__class__)
 
     @staticmethod
-    def run[T, **P](
-        func: Callable[P, T], obj_name: str, *args: P.args, **kwargs: P.kwargs
-    ) -> T:
-        try:
-            instance = _Worker._obj_dict[obj_name]
-            if isinstance(instance, tuple):
-                raise TypeError(f"Cannot run {obj_name}")  # noqa: TRY301
-            meth = cast(Callable[P, T], types.MethodType(func, instance))
-            ret_val = meth(*args, **kwargs)
-        except BaseException as ex:
-            print(f"Worker.run {func.__qualname__} exception: {ex!r}")
-            raise
-        else:
-            return ret_val
+    def run[T, **P](obj_name: str, partial: functools.partial[T]) -> T:
+        func = partial.func
+        args = partial.args
+        kwargs = partial.keywords
+        instance = _Worker._obj_dict[obj_name]
+        if isinstance(instance, tuple):
+            raise TypeError(f"Cannot run {obj_name}")
+        meth = cast(Callable[P, T], types.MethodType(func, instance))
+        return meth(*args, **kwargs)
 
     @staticmethod
-    def set[T](obj_name: str, value: T) -> None:
-        try:
-            attribute = _Worker._obj_dict[obj_name]
-            if isinstance(attribute, tuple):
-                parent, obj_name = attribute
-                setattr(parent, obj_name, value)
-            else:
-                raise TypeError(f"Cannot set {obj_name}")  # noqa: TRY301
-        except BaseException as ex:
-            print(f"Worker.set {obj_name} exception: {ex!r}")
-            raise
+    def set_value[T](obj_name: str, value: T) -> None:
+        attribute = _Worker._obj_dict[obj_name]
+        if isinstance(attribute, tuple):
+            parent, obj_name = attribute
+            setattr(parent, obj_name, value)
+        else:
+            raise TypeError(f"Cannot set {obj_name}")
 
     @staticmethod
-    def get(obj_name: str) -> object:
-        try:
-            attribute = _Worker._obj_dict[obj_name]
-            if isinstance(attribute, tuple):
-                parent, obj_name = attribute
-                attribute = getattr(parent, obj_name)
-            else:
-                raise TypeError(f"Cannot get {obj_name}")  # noqa: TRY301
-        except BaseException as ex:
-            print(f"Worker.get {obj_name} exception: {ex!r}")
-            raise
+    def get_value(obj_name: str) -> object:
+        attribute = _Worker._obj_dict[obj_name]
+        if isinstance(attribute, tuple):
+            parent, obj_name = attribute
+            attribute = getattr(parent, obj_name)
         else:
-            return attribute
+            raise TypeError(f"Cannot get {obj_name}")
+        return attribute
 
 
 class _Executor[T]:
     """Subprocess executor for running async tasks with context."""
 
     def __init__(
-        self, cls: type[T], name: str, executor: concurrent.futures.Executor,
+        self, cls: type[T], name: str, executor: concurrent.futures.Executor
     ) -> None:
         self._cls = cls
         self._name = name
@@ -107,11 +97,28 @@ class _Executor[T]:
         self._executor = executor
 
     async def _register_attr(self, attr_name: str) -> None:
+        raise NotImplementedError
+
+    async def _run[TT, **PP](
+        self, func: Callable[PP, TT], *args: PP.args, **kwargs: PP.kwargs
+    ) -> TT:
+        raise NotImplementedError
+
+    async def _set_value(self, value: T) -> None:
+        raise NotImplementedError
+
+
+class _ProcessExecutor[T](_Executor[T]):
+    """Subprocess executor for running async tasks with context."""
+
+    async def _register_attr(self, attr_name: str) -> None:
         obj_name = self._name
         klass = await self._loop.run_in_executor(
             self._executor, _Worker.register_attr, obj_name, attr_name
         )
-        sub_instance = _Executor[T](klass, f"{obj_name}.{attr_name}", self._executor)
+        sub_instance = _ProcessExecutor[T](
+            klass, f"{obj_name}.{attr_name}", self._executor
+        )
         setattr(self, attr_name, sub_instance)
 
     async def _run[TT, **PP](
@@ -119,72 +126,101 @@ class _Executor[T]:
     ) -> TT:
         method = cast(types.MethodType, func)
         obj_name = self._name
-        func = method.__func__
+        func_with_args = functools.partial(method.__func__, *args, **kwargs)
         return await self._loop.run_in_executor(
-            self._executor, _Worker.run, func, obj_name, *args, **kwargs
+            self._executor, _Worker.run, obj_name, func_with_args
+        )
+
+    async def _set_value(self, value: T) -> None:
+        obj_name = self._name
+        await self._loop.run_in_executor(
+            self._executor, _Worker.set_value, obj_name, value
         )
 
 
 class _ThreadExecutor[T, **P](_Executor[T]):
     """Subprocess executor for running async tasks with context."""
 
-    #def run[T, **P](
     def __init__(
-        self, cls: Callable[P, T], name: str, executor: concurrent.futures.Executor,
-        *args: P.args, **kwargs: P.kwargs
+        self,
+        cls: Callable[P, T],
+        name: str,
+        executor: concurrent.futures.Executor,
+        parent: _ThreadExecutor[Any, Any] | None,
+        *args: P.args,
+        **kwargs: P.kwargs,
     ) -> None:
         cls2 = cast(type[T], cls)
         super().__init__(cls2, name, executor)
-        self.args = args
-        self.kwargs = kwargs
+        self._parent = parent
+        self._args = args
+        self._kwargs = kwargs
         self._instance: T | None = None
 
-    async def _register_attr(self, attr_name: str) -> None:
+    async def _get_instance(self) -> T:
         if self._instance is None:
+            func_with_args = functools.partial(self._cls, *self._args, **self._kwargs)
             self._instance = await self._loop.run_in_executor(
-                self._executor, self._cls, *self.args, **self.kwargs
+                self._executor, func_with_args
             )
+        return self._instance
+
+    async def _register_attr(self, attr_name: str) -> None:
+        instance = await self._get_instance()
         new_instance = await self._loop.run_in_executor(
-            self._executor, getattr, self._instance, attr_name
+            self._executor, getattr, instance, attr_name
         )
         klass = cast(type, new_instance.__class__)
-        sub_instance = _ThreadExecutor(klass, f".{attr_name}", self._executor)
+        sub_instance = _ThreadExecutor(klass, attr_name, self._executor, instance)
         setattr(self, attr_name, sub_instance)
 
     async def _run[TT, **PP](
         self, func: Callable[PP, TT], *args: PP.args, **kwargs: PP.kwargs
     ) -> TT:
-        method = types.MethodType(func, self._instance)
-        return await self._loop.run_in_executor(
-            self._executor, method, *args, **kwargs
+        method = cast(types.MethodType, func)
+        instance = await self._get_instance()
+        method = types.MethodType(method.__func__, instance)
+        func_with_args = functools.partial(method, *args, **kwargs)
+        return await self._loop.run_in_executor(self._executor, func_with_args)
+
+    async def _set_value(self, value: T) -> None:
+        if self._parent is None:
+            raise ValueError("")
+        await self._loop.run_in_executor(
+            self._executor, setattr, self._parent, self._name, value
         )
+
 
 # ruff: disable[SLF001]  # private-member-access
 
 
 def create_thread[T](klass: type[T], *args: object, **kwargs: object) -> T:
-    executor = concurrent.futures.ThreadPoolExecutor(
-        max_workers=1,
-    )
-    instance = klass(*args, **kwargs)
-    exe_instance = _ThreadExecutor(klass, "root", executor, instance=instance)
-    return cast(T, exe_instance)
-
-
-def create[T](klass: type[T], *args: object, **kwargs: object) -> T:
-    """Create an executor with an instance of the specified class.
+    """Create a thread executor with an instance of the specified class.
 
     The created executor would include all the method of that class.
 
-    Notice that the worker process will only be created when you tell it
-    to run something.
+    The class will only be initiated when you tell it to run something.
+    """
+    executor = concurrent.futures.ThreadPoolExecutor(
+        max_workers=1,
+    )
+    exe_instance = _ThreadExecutor(klass, "root", executor, None, *args, **kwargs)
+    return cast(T, exe_instance)
+
+
+def create_process[T](klass: type[T], *args: object, **kwargs: object) -> T:
+    """Create a subprocess executor with an instance of the specified class.
+
+    The created executor would include all the method of that class.
+
+    The worker process will only be created when you tell it to run something.
     """
     executor = concurrent.futures.ProcessPoolExecutor(
         max_workers=1,
         initializer=_Worker.register_class,
         initargs=("root", klass, args, kwargs),
     )
-    instance = _Executor(klass, "root", executor)
+    instance = _ProcessExecutor(klass, "root", executor)
     return cast(T, instance)
 
 
@@ -215,14 +251,7 @@ async def set_value[T](attribute: T, value: T) -> None:
     """
     if not isinstance(attribute, _Executor):
         raise TypeError(f"Can only set an executor attribute. Got: {attribute!r}")
-    if attribute._instance is not None:
-        await attribute._loop.run_in_executor(
-            attribute._executor, setattr, attribute._instance, value
-        )
-    obj_name = attribute._name
-    await attribute._loop.run_in_executor(
-        attribute._executor, _Worker.set, obj_name, value
-    )
+    await attribute._set_value(value)
 
 
 async def get_value[T](attribute: T) -> T:
@@ -234,7 +263,7 @@ async def get_value[T](attribute: T) -> T:
         raise TypeError(f"Can only get an executor attribute. Got: {attribute!r}")
     obj_name = attribute._name
     ret_val = await attribute._loop.run_in_executor(
-        attribute._executor, _Worker.get, obj_name
+        attribute._executor, _Worker.get_value, obj_name
     )
     return cast(T, ret_val)
 
