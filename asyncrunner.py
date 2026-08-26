@@ -1,14 +1,12 @@
 """Subprocess executor for running async tasks with context."""
 # Copyright 2026 Udi Fuchs
 
-from __future__ import annotations
-
 import asyncio
 import concurrent.futures
 import functools
 import types
 from collections.abc import Callable
-from typing import Any, ClassVar, cast
+from typing import ClassVar, cast
 
 PICKLABLE = int, float, complex, str, bytes, bytearray
 
@@ -25,18 +23,14 @@ class _Worker:
 
     @staticmethod
     def _register_instance(key: str, instance: object) -> None:
-        if key in _Worker._obj_dict:
-            raise KeyError(f"Worker already contains {key}")
         _Worker._obj_dict[key] = instance
 
     @staticmethod
-    def register_class(
-        key: str, klass: type, args: tuple[object, ...], kwargs: dict[str, object]
-    ) -> None:
-        _Worker._register_instance(key, klass(*args, **kwargs))
+    def register_class[T](key: str, klass: Callable[[], T]) -> None:
+        _Worker._register_instance(key, klass())
 
     @staticmethod
-    def register_attr(obj_name: str, attr_name: str) -> type:
+    def attach(obj_name: str, attr_name: str) -> type:
         instance = _Worker._obj_dict[obj_name]
         new_obj_name = f"{obj_name}.{attr_name}"
         new_instance = getattr(instance, attr_name)
@@ -53,9 +47,10 @@ class _Worker:
         kwargs = partial.keywords
         instance = _Worker._obj_dict[obj_name]
         if isinstance(instance, tuple):
-            raise TypeError(f"Cannot run {obj_name}")
-        meth = cast(Callable[P, T], types.MethodType(func, instance))
-        return meth(*args, **kwargs)
+            # This should never happen.
+            raise TypeError(f"Cannot run {obj_name}")  # pragma: no cover
+        method = cast(Callable[P, T], types.MethodType(func, instance))
+        return method(*args, **kwargs)
 
     @staticmethod
     def set_value[T](obj_name: str, value: T) -> None:
@@ -64,7 +59,10 @@ class _Worker:
             parent, obj_name = attribute
             setattr(parent, obj_name, value)
         else:
-            raise TypeError(f"Cannot set {obj_name}")
+            # TRY004 Prefer `TypeError` exception for invalid type
+            # ruff: disable[TRY004]
+            raise ValueError(f"Cannot set value to executor: {attribute!r}")
+            # ruff: enable[TRY004]
 
     @staticmethod
     def get_value(obj_name: str) -> object:
@@ -72,16 +70,14 @@ class _Worker:
         if isinstance(attribute, tuple):
             parent, obj_name = attribute
             attribute = getattr(parent, obj_name)
-        else:
-            raise TypeError(f"Cannot get {obj_name}")
         return attribute
 
 
-class _Executor[T]:
+class _Executor[T, **P]:
     """Subprocess executor for running async tasks with context."""
 
     def __init__(
-        self, cls: type[T], name: str, executor: concurrent.futures.Executor
+        self, cls: Callable[P, T], name: str, executor: concurrent.futures.Executor
     ) -> None:
         self._cls = cls
         self._name = name
@@ -96,7 +92,7 @@ class _Executor[T]:
         self._loop = asyncio.get_running_loop()
         self._executor = executor
 
-    async def _register_attr(self, attr_name: str) -> None:
+    async def _attach(self, attr_name: str) -> None:
         raise NotImplementedError
 
     async def _run[TT, **PP](
@@ -107,16 +103,19 @@ class _Executor[T]:
     async def _set_value(self, value: T) -> None:
         raise NotImplementedError
 
+    async def _get_value(self) -> T:
+        raise NotImplementedError
 
-class _ProcessExecutor[T](_Executor[T]):
+
+class _ProcessExecutor[T, **P](_Executor[T, P]):
     """Subprocess executor for running async tasks with context."""
 
-    async def _register_attr(self, attr_name: str) -> None:
+    async def _attach(self, attr_name: str) -> None:
         obj_name = self._name
         klass = await self._loop.run_in_executor(
-            self._executor, _Worker.register_attr, obj_name, attr_name
+            self._executor, _Worker.attach, obj_name, attr_name
         )
-        sub_instance = _ProcessExecutor[T](
+        sub_instance = _ProcessExecutor[T, P](
             klass, f"{obj_name}.{attr_name}", self._executor
         )
         setattr(self, attr_name, sub_instance)
@@ -137,8 +136,15 @@ class _ProcessExecutor[T](_Executor[T]):
             self._executor, _Worker.set_value, obj_name, value
         )
 
+    async def _get_value(self) -> T:
+        obj_name = self._name
+        ret_val = await self._loop.run_in_executor(
+            self._executor, _Worker.get_value, obj_name
+        )
+        return cast(T, ret_val)
 
-class _ThreadExecutor[T, **P](_Executor[T]):
+
+class _ThreadExecutor[T, **P](_Executor[T, P]):
     """Subprocess executor for running async tasks with context."""
 
     def __init__(
@@ -146,7 +152,7 @@ class _ThreadExecutor[T, **P](_Executor[T]):
         cls: Callable[P, T],
         name: str,
         executor: concurrent.futures.Executor,
-        parent: _ThreadExecutor[Any, Any] | None,
+        parent: object | None,
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> None:
@@ -165,13 +171,14 @@ class _ThreadExecutor[T, **P](_Executor[T]):
             )
         return self._instance
 
-    async def _register_attr(self, attr_name: str) -> None:
+    async def _attach(self, attr_name: str) -> None:
         instance = await self._get_instance()
         new_instance = await self._loop.run_in_executor(
             self._executor, getattr, instance, attr_name
         )
         klass = cast(type, new_instance.__class__)
         sub_instance = _ThreadExecutor(klass, attr_name, self._executor, instance)
+        sub_instance._instance = new_instance
         setattr(self, attr_name, sub_instance)
 
     async def _run[TT, **PP](
@@ -185,11 +192,18 @@ class _ThreadExecutor[T, **P](_Executor[T]):
 
     async def _set_value(self, value: T) -> None:
         if self._parent is None:
-            raise ValueError("")
+            raise ValueError(f"Cannot set value to executor: {self!r}")
         await self._loop.run_in_executor(
             self._executor, setattr, self._parent, self._name, value
         )
 
+    async def _get_value(self) -> T:
+        if self._parent is None:
+            return await self._get_instance()
+        ret_val = await self._loop.run_in_executor(
+            self._executor, getattr, self._parent, self._name
+        )
+        return cast(T, ret_val)
 
 # ruff: disable[SLF001]  # private-member-access
 
@@ -208,17 +222,20 @@ def create_thread[T](klass: type[T], *args: object, **kwargs: object) -> T:
     return cast(T, exe_instance)
 
 
-def create_process[T](klass: type[T], *args: object, **kwargs: object) -> T:
+def create_process[T, **P](
+    klass: Callable[P, T], *args: P.args, **kwargs: P.kwargs
+) -> T:
     """Create a subprocess executor with an instance of the specified class.
 
     The created executor would include all the method of that class.
 
     The worker process will only be created when you tell it to run something.
     """
+    func_with_args = functools.partial(klass, *args, **kwargs)
     executor = concurrent.futures.ProcessPoolExecutor(
         max_workers=1,
         initializer=_Worker.register_class,
-        initargs=("root", klass, args, kwargs),
+        initargs=("root", func_with_args),
     )
     instance = _ProcessExecutor(klass, "root", executor)
     return cast(T, instance)
@@ -232,7 +249,7 @@ async def attach(instance: object, attr_name: str) -> None:
     """
     if not isinstance(instance, _Executor):
         raise TypeError(f"Can only attach to existing executor. Got: {instance!r}")
-    await instance._register_attr(attr_name)
+    await instance._attach(attr_name)
 
 
 async def run[T, **P](func: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
@@ -261,17 +278,14 @@ async def get_value[T](attribute: T) -> T:
     """
     if not isinstance(attribute, _Executor):
         raise TypeError(f"Can only get an executor attribute. Got: {attribute!r}")
-    obj_name = attribute._name
-    ret_val = await attribute._loop.run_in_executor(
-        attribute._executor, _Worker.get_value, obj_name
-    )
+    ret_val = await attribute._get_value()
     return cast(T, ret_val)
 
 
 def shutdown(instance: object) -> None:
     """Shutdown an executor."""
     if not isinstance(instance, _Executor):
-        raise TypeError("Can only shutdown executor object")
+        raise TypeError(f"Can only shutdown executor object. Got: {instance!r}")
     instance._executor.shutdown()
 
 

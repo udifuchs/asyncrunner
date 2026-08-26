@@ -19,9 +19,10 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
     "Topic :: System :: Archiving :: Backup",
 ]
-keywords = [ ]
+keywords = [ "asyncio" ]
 readme = "README.md"
 version = "0.1"
 
@@ -34,23 +35,17 @@ py-modules = [ "asyncrunner" ]
 [tool.mypy]
 files = [ "asyncrunner.py", "test.py" ]
 strict = true
-python_version = "3.12"
 
 [tool.ruff]
 exclude = [ "build" ]
-include = [ "*.py" ]
 
 [tool.ruff.lint]
 select = [ "ALL" ]
 
 ignore = [
     "COM812",  # Trailing comma missing
-    "D105",  # Missing docstring in magic method
-    "D107",  # Missing docstring in __init__
     "EM101",  # Exception must not use a string literal, assign to variable first
     "EM102",  # Exception must not use an f-string literal, assign to variable first
-    "S603",  # `subprocess` call: check for execution of untrusted input
-    "TC003",  # Move standard library import `...` into a type-checking block
     "TC006",  # Add quotes to type expression in `typing.cast()`
     "TRY003",  # Avoid specifying long messages outside the exception class
 ]
@@ -62,6 +57,7 @@ pydocstyle.convention = "google"
     "D101",  # Missing docstring in public class
     "D102",  # Missing docstring in public method
     "D103",  # Missing docstring in public function
+    "D107",  # Missing docstring in __init__
     "PLR2004",  # Magic value used in comparison
     "S101",  # Use of 'assert' detected
 ]
