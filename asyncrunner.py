@@ -3,6 +3,7 @@
 
 import asyncio
 import concurrent.futures
+import enum
 import functools
 import sys
 import types
@@ -221,7 +222,9 @@ class _ThreadExecutor[T, **P](_Executor[T, P]):
         return cast(T, ret_val)
 
 
-def create_thread[T](klass: type[T], *args: object, **kwargs: object) -> T:
+def create_thread[T, **P](
+    klass: Callable[P, T], *args: P.args, **kwargs: P.kwargs
+) -> T:
     """Create a thread executor with an instance of the specified class.
 
     The created executor would include all the method of that class.
@@ -273,6 +276,29 @@ if sys.version_info >= (3, 14):
         )
         instance = _InterpreterExecutor(klass, "root", executor)
         return cast(T, instance)
+
+
+class Mode(enum.Enum):
+    """Concurrency operation modes for the executor."""
+
+    THREAD = "thread"
+    PROCESS = "process"
+    INTERPRETER = "interpreter"
+
+
+def create[T, **P](
+    mode: Mode, klass: Callable[P, T], *args: P.args, **kwargs: P.kwargs
+) -> T:
+    """Create an executor with an instance of the specified class."""
+    match mode:
+        case Mode.THREAD:
+            return create_thread(klass, *args, **kwargs)
+        case Mode.PROCESS:
+            return create_process(klass, *args, **kwargs)
+        case Mode.INTERPRETER:
+            return create_interpreter(klass, *args, **kwargs)
+        case _:
+            raise AssertionError
 
 
 # ruff: disable[SLF001]  # private-member-access

@@ -32,6 +32,18 @@ version = "0.1"
 [tool.setuptools]
 py-modules = [ "asyncrunner" ]
 
+[tool.coverage.run]
+parallel = true
+concurrency = [ "multiprocessing" ]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+exclude_also = [
+    "raise NotImplementedError",
+    "case _:\\n\\s*raise AssertionError",
+]
+
 [tool.mypy]
 files = [ "asyncrunner.py", "test_runner.py" ]
 strict = true

@@ -36,20 +36,12 @@ class Foo:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("mode", [
-    "thread",
-    "process",
-    "interpreter",
-])
-async def test_runner(mode: str) -> None:
-    if mode == "thread":
-        foo_exe = a.create_thread(Foo, 3, str_value="hello")
-    elif mode == "process":
-        foo_exe = a.create_process(Foo, 3, str_value="hello")
-    else:  # mode == "interpreter"
-        if sys.version_info < (3, 14):
-            pytest.skip()
-        foo_exe = a.create_interpreter(Foo, 3, str_value="hello")
+@pytest.mark.parametrize("mode", list(a.Mode))
+async def test_runner(mode: a.Mode) -> None:
+    if mode == a.Mode.INTERPRETER and sys.version_info < (3, 14):
+        pytest.skip()
+
+    foo_exe = a.create(mode, Foo, 3, str_value="hello")
     exe_name = foo_exe.__class__.__name__
 
     # Test method call:
@@ -136,23 +128,19 @@ async def test_type_errors() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("mode", [
-    "thread",
-    "process",
-    "interpreter",
-])
-async def test_value_errors(*, mode: str) -> None:
-    if mode == "thread":
-        foo_exe = a.create_thread(Foo, 3, str_value="hello")
-        exe_name = "asyncrunner._ThreadExecutor"
-    elif mode == "process":
-        foo_exe = a.create_process(Foo, 3, str_value="hello")
-        exe_name = "test_runner.Foo"
-    else:  # mode == "interpreter"
-        if sys.version_info < (3, 14):
-            pytest.skip()
-        foo_exe = a.create_interpreter(Foo, 3, str_value="hello")
-        exe_name = "test_runner.Foo"
+@pytest.mark.parametrize("mode", list(a.Mode))
+async def test_value_errors(mode: a.Mode) -> None:
+    if mode == a.Mode.INTERPRETER and sys.version_info < (3, 14):
+        pytest.skip()
+
+    foo_exe = a.create(mode, Foo, 3, str_value="hello")
+    match mode:
+        case a.Mode.THREAD:
+            exe_name = "asyncrunner._ThreadExecutor"
+        case a.Mode.PROCESS | a.Mode.INTERPRETER:
+            exe_name = "test_runner.Foo"
+        case _:
+            raise AssertionError
 
     with pytest.raises(
         ValueError, match=rf"Cannot set value to executor: <{exe_name} object"
@@ -164,45 +152,43 @@ async def test_value_errors(*, mode: str) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("mode", [
-    "thread",
-    "process",
-    "interpreter",
-])
-async def test_pickles(*, mode: str) -> None:
-    if mode == "thread":
-        foo_exe = a.create_thread(Foo, 3, str_value="hello")
-    elif mode == "process":
-        foo_exe = a.create_process(Foo, 3, str_value="hello")
-    else:  # mode == "interpreter"
-        if sys.version_info < (3, 14):
-            pytest.skip()
-        foo_exe = a.create_interpreter(Foo, 3, str_value="hello")
+@pytest.mark.parametrize("mode", list(a.Mode))
+async def test_pickles(mode: a.Mode) -> None:
+    if mode == a.Mode.INTERPRETER and sys.version_info < (3, 14):
+        pytest.skip()
+
+    foo_exe = a.create(mode, Foo, 3, str_value="hello")
 
     await a.attach(foo_exe, "foo")
     # Create a file handle that cannot be pickled:
     await a.run(foo_exe.foo.open_file, pathlib.Path("pyproject.toml"))
-    if mode == "thread":
-        foo = await a.get_value(foo_exe.foo)
-        assert foo.num == 2
-    else:  # mode in "process", "interpreter":
-        pickle_error_message = (
-            "cannot pickle 'TextIOWrapper' instances"
-            if mode == "process"
-            else "object does not support cross-interpreter data"
-        )
-        with pytest.raises(TypeError, match=pickle_error_message):
-            await a.get_value(foo_exe.foo)
+    match mode:
+        case a.Mode.THREAD:
+            foo = await a.get_value(foo_exe.foo)
+            assert foo.num == 2
+        case a.Mode.PROCESS | a.Mode.INTERPRETER:
+            pickle_error_message = (
+                "cannot pickle 'TextIOWrapper' instances"
+                if mode == a.Mode.PROCESS
+                else "object does not support cross-interpreter data"
+            )
+            with pytest.raises(TypeError, match=pickle_error_message):
+                await a.get_value(foo_exe.foo)
+        case _:
+            raise AssertionError
 
     # Replace the non-picklable foo with a picklable one:
     await a.run(foo_exe.replace_foo, Foo(-77, "world"))
     # This still does not prevent the exception:
-    if mode == "thread":
-        foo = await a.get_value(foo_exe.foo)
-        assert foo.num == -77
-    else:  # mode == "process":
-        with pytest.raises(TypeError, match=pickle_error_message):
-            await a.get_value(foo_exe.foo)
+    match mode:
+        case a.Mode.THREAD:
+            foo = await a.get_value(foo_exe.foo)
+            assert foo.num == -77
+        case a.Mode.PROCESS | a.Mode.INTERPRETER:
+            with pytest.raises(TypeError, match=pickle_error_message):
+                await a.get_value(foo_exe.foo)
+        case _:
+            raise AssertionError
     # For replace_foo to take effect, we need to re-attach foo:
     await a.attach(foo_exe, "foo")
     foo = await a.get_value(foo_exe.foo)
