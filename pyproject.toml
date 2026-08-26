@@ -33,7 +33,7 @@ version = "0.1"
 py-modules = [ "asyncrunner" ]
 
 [tool.mypy]
-files = [ "asyncrunner.py", "test.py" ]
+files = [ "asyncrunner.py", "test_runner.py" ]
 strict = true
 
 [tool.ruff]
@@ -53,7 +53,7 @@ ignore = [
 pydocstyle.convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
-"test.py" = [
+"test_runner.py" = [
     "D101",  # Missing docstring in public class
     "D102",  # Missing docstring in public method
     "D103",  # Missing docstring in public function

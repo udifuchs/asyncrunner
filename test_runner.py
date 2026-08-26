@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import pathlib
+import sys
 
 import pytest
 
@@ -38,12 +39,17 @@ class Foo:
 @pytest.mark.parametrize("mode", [
     "thread",
     "process",
+    "interpreter",
 ])
-async def test_runner(*, mode: str) -> None:
+async def test_runner(mode: str) -> None:
     if mode == "thread":
         foo_exe = a.create_thread(Foo, 3, str_value="hello")
-    else:  # mode == "process":
+    elif mode == "process":
         foo_exe = a.create_process(Foo, 3, str_value="hello")
+    else:  # mode == "interpreter"
+        if sys.version_info < (3, 14):
+            pytest.skip()
+        foo_exe = a.create_interpreter(Foo, 3, str_value="hello")
     exe_name = foo_exe.__class__.__name__
 
     # Test method call:
@@ -105,13 +111,13 @@ async def test_type_errors() -> None:
     with pytest.raises(TypeError) as ex:
         await a.run(foo.get_num)
     assert str(ex.value).startswith(
-        "Can only run an executor method. Got: <test.Foo object"
+        "Can only run an executor method. Got: <test_runner.Foo object"
     )
 
     with pytest.raises(TypeError) as ex:
         await a.attach(foo, "str_with_num")
     assert str(ex.value).startswith(
-        "Can only attach to existing executor. Got: <test.Foo object"
+        "Can only attach to existing executor. Got: <test_runner.Foo object"
     )
 
     with pytest.raises(TypeError) as ex:
@@ -125,7 +131,7 @@ async def test_type_errors() -> None:
     with pytest.raises(TypeError) as ex:
         a.shutdown(foo)
     assert str(ex.value).startswith(
-        "Can only shutdown executor object. Got: <test.Foo object"
+        "Can only shutdown executor object. Got: <test_runner.Foo object"
     )
 
 
@@ -133,18 +139,23 @@ async def test_type_errors() -> None:
 @pytest.mark.parametrize("mode", [
     "thread",
     "process",
+    "interpreter",
 ])
 async def test_value_errors(*, mode: str) -> None:
     if mode == "thread":
         foo_exe = a.create_thread(Foo, 3, str_value="hello")
         exe_name = "asyncrunner._ThreadExecutor"
-    else:  # mode == "process":
+    elif mode == "process":
         foo_exe = a.create_process(Foo, 3, str_value="hello")
-        exe_name = "test.Foo"
+        exe_name = "test_runner.Foo"
+    else:  # mode == "interpreter"
+        if sys.version_info < (3, 14):
+            pytest.skip()
+        foo_exe = a.create_interpreter(Foo, 3, str_value="hello")
+        exe_name = "test_runner.Foo"
 
     with pytest.raises(
-        ValueError,
-        match=fr"Cannot set value to executor: <{exe_name} object"
+        ValueError, match=rf"Cannot set value to executor: <{exe_name} object"
     ):
         await a.set_value(foo_exe, 3)
 
@@ -156,12 +167,17 @@ async def test_value_errors(*, mode: str) -> None:
 @pytest.mark.parametrize("mode", [
     "thread",
     "process",
+    "interpreter",
 ])
 async def test_pickles(*, mode: str) -> None:
     if mode == "thread":
         foo_exe = a.create_thread(Foo, 3, str_value="hello")
-    else:  # mode == "process":
+    elif mode == "process":
         foo_exe = a.create_process(Foo, 3, str_value="hello")
+    else:  # mode == "interpreter"
+        if sys.version_info < (3, 14):
+            pytest.skip()
+        foo_exe = a.create_interpreter(Foo, 3, str_value="hello")
 
     await a.attach(foo_exe, "foo")
     # Create a file handle that cannot be pickled:
@@ -169,8 +185,13 @@ async def test_pickles(*, mode: str) -> None:
     if mode == "thread":
         foo = await a.get_value(foo_exe.foo)
         assert foo.num == 2
-    else:  # mode == "process":
-        with pytest.raises(TypeError, match="cannot pickle 'TextIOWrapper' instances"):
+    else:  # mode in "process", "interpreter":
+        pickle_error_message = (
+            "cannot pickle 'TextIOWrapper' instances"
+            if mode == "process"
+            else "object does not support cross-interpreter data"
+        )
+        with pytest.raises(TypeError, match=pickle_error_message):
             await a.get_value(foo_exe.foo)
 
     # Replace the non-picklable foo with a picklable one:
@@ -180,7 +201,7 @@ async def test_pickles(*, mode: str) -> None:
         foo = await a.get_value(foo_exe.foo)
         assert foo.num == -77
     else:  # mode == "process":
-        with pytest.raises(TypeError, match="cannot pickle 'TextIOWrapper' instances"):
+        with pytest.raises(TypeError, match=pickle_error_message):
             await a.get_value(foo_exe.foo)
     # For replace_foo to take effect, we need to re-attach foo:
     await a.attach(foo_exe, "foo")

@@ -4,6 +4,7 @@
 import asyncio
 import concurrent.futures
 import functools
+import sys
 import types
 from collections.abc import Callable
 from typing import ClassVar, cast
@@ -144,6 +145,20 @@ class _ProcessExecutor[T, **P](_Executor[T, P]):
         return cast(T, ret_val)
 
 
+class _InterpreterExecutor[T, **P](_ProcessExecutor[T, P]):
+    """Subinterpreter executor for running async tasks with context."""
+
+    async def _attach(self, attr_name: str) -> None:
+        obj_name = self._name
+        klass = await self._loop.run_in_executor(
+            self._executor, _Worker.attach, obj_name, attr_name
+        )
+        sub_instance = _InterpreterExecutor[T, P](
+            klass, f"{obj_name}.{attr_name}", self._executor
+        )
+        setattr(self, attr_name, sub_instance)
+
+
 class _ThreadExecutor[T, **P](_Executor[T, P]):
     """Subprocess executor for running async tasks with context."""
 
@@ -205,8 +220,6 @@ class _ThreadExecutor[T, **P](_Executor[T, P]):
         )
         return cast(T, ret_val)
 
-# ruff: disable[SLF001]  # private-member-access
-
 
 def create_thread[T](klass: type[T], *args: object, **kwargs: object) -> T:
     """Create a thread executor with an instance of the specified class.
@@ -239,6 +252,30 @@ def create_process[T, **P](
     )
     instance = _ProcessExecutor(klass, "root", executor)
     return cast(T, instance)
+
+
+if sys.version_info >= (3, 14):
+
+    def create_interpreter[T, **P](
+        klass: Callable[P, T], *args: P.args, **kwargs: P.kwargs
+    ) -> T:
+        """Create an interpreter executor with an instance of the specified class.
+
+        The created executor would include all the method of that class.
+
+        The worker interpreter will only be created when you tell it to run something.
+        """
+        func_with_args = functools.partial(klass, *args, **kwargs)
+        executor = concurrent.futures.InterpreterPoolExecutor(
+            max_workers=1,
+            initializer=_Worker.register_class,
+            initargs=("root", func_with_args),
+        )
+        instance = _InterpreterExecutor(klass, "root", executor)
+        return cast(T, instance)
+
+
+# ruff: disable[SLF001]  # private-member-access
 
 
 async def attach(instance: object, attr_name: str) -> None:
