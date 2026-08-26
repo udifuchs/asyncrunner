@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "asyncrunner"
-description = "Runner synchronos object in an asynchronized context."
+description = "Run asynchronous object in an asynchronized context."
 authors = [
     { name = "Udi Fuchs", email = "udifuchs@gmail.com" },
 ]
@@ -13,16 +13,15 @@ license = "MIT"
 license-files = [ "LICENSE" ]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
-    "Environment :: Console",
-    "Operating System :: POSIX",
+    "Intended Audience :: Developers",
     "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
     "Programming Language :: Python :: 3.15",
-    "Topic :: System :: Archiving :: Backup",
+    "Topic :: Software Development :: Libraries :: Python Modules",
 ]
-keywords = [ "asyncio" ]
+keywords = [ "asyncio", "concurrency" ]
 readme = "README.md"
 version = "0.1"
 
