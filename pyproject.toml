@@ -12,7 +12,7 @@ requires-python = ">=3.12"
 license = "MIT"
 license-files = [ "LICENSE" ]
 classifiers = [
-    "Development Status :: 5 - Production/Stable",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.12",
@@ -71,4 +71,5 @@ pydocstyle.convention = "google"
     "D107",  # Missing docstring in __init__
     "PLR2004",  # Magic value used in comparison
     "S101",  # Use of 'assert' detected
+    "TC003",  # Move standard library import `...` into a type-checking block
 ]

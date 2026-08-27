@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import pathlib
 import sys
+from collections.abc import Sequence
 
 import pytest
 
@@ -15,14 +16,19 @@ class Foo:
     def __init__(self, num: int, str_value: str) -> None:
         self.num = num
         self.str = str_value
+        self.list = [1, 2, 3]
         if num > 0:
             self.foo = Foo(num - 1, str_value)
 
     def get_num(self) -> int:
+        self.num += 1
         return self.num
 
     def get_str(self, postfix: str = "") -> str:
         return self.str + postfix
+
+    def get_list(self) -> Sequence[int]:
+        return self.list
 
     def replace_foo(self, foo: Foo) -> None:
         self.foo = foo
@@ -46,7 +52,7 @@ async def test_runner(mode: a.Mode) -> None:
 
     # Test method call:
     num = await a.run(foo_exe.get_num)
-    assert num == 3
+    assert num == 4
 
     # Test method call with argument:
     str_value = await a.run(foo_exe.get_str, "!")
@@ -56,6 +62,17 @@ async def test_runner(mode: a.Mode) -> None:
     str_value = await a.run(foo_exe.get_str, postfix="!")
     assert str_value == "hello!"
 
+    # Test returning a container:
+    foo_list = await a.run(foo_exe.get_list)
+    assert foo_list == [1, 2, 3]
+    # The list container is shared when using threads:
+    foo_list[1] = 7
+    foo_list = await a.run(foo_exe.get_list)
+    if mode == a.Mode.THREAD:
+        assert foo_list == [1, 7, 3]
+    else:
+        assert foo_list == [1, 2, 3]
+
     # Instance attribute are not visible until they are attached:
     with pytest.raises(AttributeError) as ex:
         await a.set_value(foo_exe.foo, Foo(0, ""))
@@ -64,23 +81,23 @@ async def test_runner(mode: a.Mode) -> None:
     # Test attaching subclass instance attribute:
     await a.attach(foo_exe, "foo")
     num = await a.run(foo_exe.foo.get_num)
-    assert num == 2
+    assert num == 3
     await a.attach(foo_exe.foo, "foo")
     num = await a.run(foo_exe.foo.foo.get_num)
-    assert num == 1
+    assert num == 2
 
     # Test attaching value instance attribute:
     await a.attach(foo_exe, "num")
     await a.set_value(foo_exe.num, 7)
     num = await a.run(foo_exe.get_num)
-    assert num == 7
+    assert num == 8
     num = await a.get_value(foo_exe.num)
-    assert num == 7
+    assert num == 8
 
     # Test get value for properties:
     await a.attach(foo_exe, "str_with_num")
     str_with_num = await a.get_value(foo_exe.str_with_num)
-    assert str_with_num == "hello:7"
+    assert str_with_num == "hello:8"
     with pytest.raises(AttributeError) as ex:
         await a.set_value(foo_exe.str_with_num, "123")
     assert str(ex.value) == "property 'str_with_num' of 'Foo' object has no setter"

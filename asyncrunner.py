@@ -1,4 +1,4 @@
-"""Subprocess executor for running async tasks with context."""
+"""Interface for running synchronous routines in python async context."""
 # Copyright 2026 Udi Fuchs
 
 import asyncio
@@ -14,11 +14,12 @@ PICKLABLE = int, float, complex, str, bytes, bytearray
 
 
 class _Worker:
-    """Worker handles the context for subprocess Executor.
+    """Worker handles the context for subprocess and interpreter Executors.
 
     Worker should be initialised with a class. An instance of this class is stored
-    as a class variable. This instance is global to the process, but since
-    since each Worker runs in its own subprocess, the instance is local to the Worker.
+    as a class variable. This instance is global to the process/interperter, but since
+    since each Worker runs in its own subprocess/interperter,
+    the instance is local to the Worker.
     """
 
     _obj_dict: ClassVar[dict[str, object]] = {}
@@ -76,7 +77,7 @@ class _Worker:
 
 
 class _Executor[T, **P]:
-    """Subprocess executor for running async tasks with context."""
+    """Executor for running async tasks in an isolated context."""
 
     def __init__(
         self, cls: Callable[P, T], name: str, executor: concurrent.futures.Executor
@@ -117,7 +118,7 @@ class _Executor[T, **P]:
 
 
 class _ProcessExecutor[T, **P](_Executor[T, P]):
-    """Subprocess executor for running async tasks with context."""
+    """Subprocess executor for running async tasks in an isolated context."""
 
     async def _attach(self, attr_name: str) -> None:
         obj_name = self._name
@@ -154,7 +155,7 @@ class _ProcessExecutor[T, **P](_Executor[T, P]):
 
 
 class _InterpreterExecutor[T, **P](_ProcessExecutor[T, P]):
-    """Subinterpreter executor for running async tasks with context."""
+    """Subinterpreter executor for running async tasks in an isolated context."""
 
     async def _attach(self, attr_name: str) -> None:
         obj_name = self._name
@@ -168,7 +169,7 @@ class _InterpreterExecutor[T, **P](_ProcessExecutor[T, P]):
 
 
 class _ThreadExecutor[T, **P](_Executor[T, P]):
-    """Subprocess executor for running async tasks with context."""
+    """Thread executor for running async tasks in an isolated context."""
 
     def __init__(
         self,
