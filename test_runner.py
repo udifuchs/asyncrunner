@@ -134,21 +134,29 @@ async def test_value_errors(mode: a.Mode) -> None:
         pytest.skip()
 
     foo_exe = a.create(mode, Foo, 3, str_value="hello")
+    exe_name = foo_exe.__class__.__name__
     match mode:
         case a.Mode.THREAD:
-            exe_name = "asyncrunner._ThreadExecutor"
+            obj_name = "asyncrunner._ThreadExecutor"
         case a.Mode.PROCESS | a.Mode.INTERPRETER:
-            exe_name = "test_runner.Foo"
+            obj_name = "test_runner.Foo"
         case _:
             raise AssertionError
 
     with pytest.raises(
-        ValueError, match=rf"Cannot set value to executor: <{exe_name} object"
+        ValueError, match=rf"Cannot set value to executor: <{obj_name} object"
     ):
         await a.set_value(foo_exe, 3)
 
     foo = await a.get_value(foo_exe)
     assert foo.num == 3
+
+    with pytest.raises(
+        AttributeError,
+        match=r"Cannot set executor attribute directly, key: num: "
+        rf"<asyncrunner.{exe_name} object at",
+    ):
+        foo_exe.num = 7
 
 
 @pytest.mark.asyncio

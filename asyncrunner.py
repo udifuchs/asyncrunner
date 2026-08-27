@@ -90,7 +90,7 @@ class _Executor[T, **P]:
                 func = getattr(cls, funcname)
                 if not callable(func):
                     continue
-                setattr(self, funcname, func.__get__(self, cls))
+                object.__setattr__(self, funcname, func.__get__(self, cls))
         self._loop = asyncio.get_running_loop()
         self._executor = executor
 
@@ -108,6 +108,13 @@ class _Executor[T, **P]:
     async def _get_value(self) -> T:
         raise NotImplementedError
 
+    def __setattr__(self, key: str, value: object) -> None:
+        if key[0] != "_":
+            raise AttributeError(
+                f"Cannot set executor attribute directly, key: {key}: {self!r}"
+            )
+        super().__setattr__(key, value)
+
 
 class _ProcessExecutor[T, **P](_Executor[T, P]):
     """Subprocess executor for running async tasks with context."""
@@ -120,7 +127,7 @@ class _ProcessExecutor[T, **P](_Executor[T, P]):
         sub_instance = _ProcessExecutor[T, P](
             klass, f"{obj_name}.{attr_name}", self._executor
         )
-        setattr(self, attr_name, sub_instance)
+        object.__setattr__(self, attr_name, sub_instance)
 
     async def _run[TT, **PP](
         self, func: Callable[PP, TT], *args: PP.args, **kwargs: PP.kwargs
@@ -157,7 +164,7 @@ class _InterpreterExecutor[T, **P](_ProcessExecutor[T, P]):
         sub_instance = _InterpreterExecutor[T, P](
             klass, f"{obj_name}.{attr_name}", self._executor
         )
-        setattr(self, attr_name, sub_instance)
+        object.__setattr__(self, attr_name, sub_instance)
 
 
 class _ThreadExecutor[T, **P](_Executor[T, P]):
@@ -195,7 +202,7 @@ class _ThreadExecutor[T, **P](_Executor[T, P]):
         klass = cast(type, new_instance.__class__)
         sub_instance = _ThreadExecutor(klass, attr_name, self._executor, instance)
         sub_instance._instance = new_instance
-        setattr(self, attr_name, sub_instance)
+        object.__setattr__(self, attr_name, sub_instance)
 
     async def _run[TT, **PP](
         self, func: Callable[PP, TT], *args: PP.args, **kwargs: PP.kwargs
