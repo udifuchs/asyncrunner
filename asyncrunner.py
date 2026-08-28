@@ -32,6 +32,8 @@ class _Worker:
         instance = _Worker._obj_dict[obj_name]
         new_obj_name = f"{obj_name}.{attr_name}"
         new_instance = getattr(instance, attr_name)
+        if new_obj_name in _Worker._val_dict:
+            del _Worker._val_dict[new_obj_name]
         _Worker._obj_dict[new_obj_name] = new_instance
         return cast(type, new_instance.__class__)
 
@@ -40,6 +42,8 @@ class _Worker:
         instance = _Worker._obj_dict[obj_name]
         new_obj_name = f"{obj_name}.{attr_name}"
         new_instance = getattr(instance, attr_name)
+        if new_obj_name in _Worker._obj_dict:
+            del _Worker._obj_dict[new_obj_name]
         _Worker._val_dict[new_obj_name] = instance, attr_name
         return cast(type, new_instance.__class__)
 
@@ -354,7 +358,7 @@ async def attach_object(instance: object, attr_name: str) -> None:
     parent executor.
     """
     if not isinstance(instance, _ExecutorObject):
-        raise TypeError(f"Can only attach to existing executor. Got: {instance!r}")
+        raise TypeError(f"Can only attach to executor object. Got: {instance!r}")
     await instance._attach_object(attr_name)
 
 
@@ -367,7 +371,7 @@ async def attach_value(instance: object, attr_name: str) -> None:
     parent executor.
     """
     if not isinstance(instance, _ExecutorObject):
-        raise TypeError(f"Can only attach to existing executor. Got: {instance!r}")
+        raise TypeError(f"Can only attach to executor object. Got: {instance!r}")
     await instance._attach_value(attr_name)
 
 
@@ -393,7 +397,7 @@ async def set_value[T](attribute: T, value: T) -> None:
     This only works for picklable values.
     """
     if not isinstance(attribute, _ExecutorValue):
-        raise TypeError(f"Can only set an executor attribute. Got: {attribute!r}")
+        raise TypeError(f"Can only set an executor value. Got: {attribute!r}")
     await attribute._set_value(value)
 
 
@@ -403,7 +407,7 @@ async def get_value[T](attribute: T) -> T:
     This only works for picklable values.
     """
     if not isinstance(attribute, _ExecutorValue):
-        raise TypeError(f"Can only get an executor attribute. Got: {attribute!r}")
+        raise TypeError(f"Can only get an executor value. Got: {attribute!r}")
     ret_val = await attribute._get_value()
     return cast(T, ret_val)
 

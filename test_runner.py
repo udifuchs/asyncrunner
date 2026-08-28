@@ -135,22 +135,22 @@ async def test_type_errors() -> None:
     with pytest.raises(TypeError) as ex:
         await a.attach_object(foo, "str_with_num")
     assert str(ex.value).startswith(
-        "Can only attach to existing executor. Got: <test_runner.Foo object"
+        "Can only attach to executor object. Got: <test_runner.Foo object"
     )
 
     with pytest.raises(TypeError) as ex:
         await a.attach_value(foo, "str_with_num")
     assert str(ex.value).startswith(
-        "Can only attach to existing executor. Got: <test_runner.Foo object"
+        "Can only attach to executor object. Got: <test_runner.Foo object"
     )
 
     with pytest.raises(TypeError) as ex:
         await a.set_value(foo.num, 3)
-    assert str(ex.value) == "Can only set an executor attribute. Got: 3"
+    assert str(ex.value) == "Can only set an executor value. Got: 3"
 
     with pytest.raises(TypeError) as ex:
         await a.get_value(foo.num)
-    assert str(ex.value) == "Can only get an executor attribute. Got: 3"
+    assert str(ex.value) == "Can only get an executor value. Got: 3"
 
     with pytest.raises(TypeError) as ex:
         a.shutdown(foo)
@@ -170,7 +170,7 @@ async def test_value_errors(mode: a.Mode) -> None:
 
     with pytest.raises(
         TypeError,
-        match=rf"Can only set an executor attribute. Got: "
+        match=rf"Can only set an executor value. Got: "
         rf"<asyncrunner.{exe_name} object at",
     ):
         # set_value type annotations cannot state that this is a typing error
@@ -179,7 +179,7 @@ async def test_value_errors(mode: a.Mode) -> None:
 
     with pytest.raises(
         TypeError,
-        match=rf"Can only get an executor attribute. Got: "
+        match=rf"Can only get an executor value. Got: "
         rf"<asyncrunner.{exe_name} object at",
     ):
         await a.get_value(foo_exe)
@@ -246,3 +246,20 @@ async def test_pickles(mode: a.Mode) -> None:
     await a.attach_value(foo_exe.foo, "file")
     file = await a.get_value(foo_exe.foo.file)
     assert file is None
+
+    # Attaching a value to a previously attached object, makes the object inaccessible:
+    await a.attach_value(foo_exe, "foo")
+    with pytest.raises(TypeError) as ex:
+        await a.attach_value(foo_exe.foo, "foo")
+    exe_name = foo_exe.foo.__class__.__name__
+    assert str(ex.value).startswith(
+        f"Can only attach to executor object. Got: <asyncrunner.{exe_name}"
+    )
+    # Attaching an objecy to a previously attached value, makes the value inaccessible:
+    await a.attach_object(foo_exe, "foo")
+    with pytest.raises(TypeError) as ex:
+        await a.set_value(foo_exe.foo, Foo(6, "Now"))
+    exe_name = foo_exe.foo.__class__.__name__
+    assert str(ex.value).startswith(
+        f"Can only set an executor value. Got: <asyncrunner.{exe_name} object at"
+    )
