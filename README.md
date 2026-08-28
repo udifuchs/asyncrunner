@@ -11,23 +11,37 @@ For example:
 import time
 import asyncrunner as a
 
+
+class Bar:
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+    def get_name(self) -> str:
+        return self.name
+
+
 class Foo:
-    def __init__(self, num: int) -> None:
+    def __init__(self, num: int, name: str) -> None:
         self.num = num
+        self.bar = Bar(name)
 
     def get_num(self) -> int:
         self.num += 1
         time.sleep(1)
         return self.num
 
-async def bar():
-    foo_exe = a.create_thread(Foo, 3)
-    await a.init(foo_exe)
-    print("num =", await a.run(foo_exe.get_num))  # print num = 4
-    print("num =", await a.run(foo_exe.get_num))  # print num = 5
-    await a.attach(foo_exe, "num")
-    print("num =", await a.get_value(foo_exe.num)  # print num = 5
+
+async def spam() -> None:
+    foo_exe = a.create_thread(Foo, 3, "Joe")
+    assert await a.run(foo_exe.get_num) == 4
+    assert await a.run(foo_exe.get_num) == 5
+
+    await a.attach_value(foo_exe, "num")
+    assert await a.get_value(foo_exe.num) == 5
     await a.set_value(foo_exe.num, 0)
+
+    await a.attach_object(foo_exe, "bar")
+    assert await a.run(foo_exe.bar.get_name) == "Joe"
 ```
 
 The `a.create_thread` routine returns an executor that encapsulates an instance of the `Foo` class.
@@ -36,12 +50,12 @@ But these methods can only be accessed using the asynchronous `a.run` routine.
 This guarantees that these methods would not block the event loop.
 
 Initially, the executor has access to the class methods, but not to the instance attributes (`self.num` in this case).
-Instance attributes can be attached to the executor using the `a.attach` routine.
+Instance attributes can be attached to the executor using the `a.attach_value` routine.
 Then `a.set_value` and `a.get_value` can be used to access these attributes.
 
 The class instance is hidden inside the executor.
 Actually, `a.create_thread` avoids creating this instance since the `__init__` method could be blocking.
-The instance is created on the first `a.run` or `a.attach` call on the executor.
+The instance is created on the first `a.run`, `a.attach_object` or `a.attach_value` call on the executor.
 
 The instance methods are always executed in the same dedicated thread.
 This reduces the chances of concurrency issues due to accessing the same data from different threads.

@@ -3,9 +3,11 @@
 
 from __future__ import annotations
 
+import array
 import pathlib
 import sys
 from collections.abc import Sequence
+from typing import TextIO
 
 import pytest
 
@@ -17,8 +19,10 @@ class Foo:
         self.num = num
         self.str = str_value
         self.list = [1, 2, 3]
+        self.arr = array.array("i", [11, 22, 33])
         if num > 0:
             self.foo = Foo(num - 1, str_value)
+        self.file: TextIO | None = None
 
     def get_num(self) -> int:
         self.num += 1
@@ -78,24 +82,29 @@ async def test_runner(mode: a.Mode) -> None:
         await a.set_value(foo_exe.foo, Foo(0, ""))
     assert str(ex.value) == f"'{exe_name}' object has no attribute 'foo'"
 
-    # Test attaching subclass instance attribute:
-    await a.attach(foo_exe, "foo")
+    # Test attaching sub-object instance attribute:
+    await a.attach_object(foo_exe, "foo")
     num = await a.run(foo_exe.foo.get_num)
     assert num == 3
-    await a.attach(foo_exe.foo, "foo")
+    await a.attach_object(foo_exe.foo, "foo")
     num = await a.run(foo_exe.foo.foo.get_num)
     assert num == 2
 
     # Test attaching value instance attribute:
-    await a.attach(foo_exe, "num")
+    await a.attach_value(foo_exe, "num")
     await a.set_value(foo_exe.num, 7)
     num = await a.run(foo_exe.get_num)
     assert num == 8
     num = await a.get_value(foo_exe.num)
     assert num == 8
 
+    await a.attach_value(foo_exe, "list")
+    await a.set_value(foo_exe.list, [7, 7, 7])
+    foo_list = await a.get_value(foo_exe.list)
+    assert foo_list == [7, 7, 7]
+
     # Test get value for properties:
-    await a.attach(foo_exe, "str_with_num")
+    await a.attach_value(foo_exe, "str_with_num")
     str_with_num = await a.get_value(foo_exe.str_with_num)
     assert str_with_num == "hello:8"
     with pytest.raises(AttributeError) as ex:
@@ -124,7 +133,13 @@ async def test_type_errors() -> None:
     )
 
     with pytest.raises(TypeError) as ex:
-        await a.attach(foo, "str_with_num")
+        await a.attach_object(foo, "str_with_num")
+    assert str(ex.value).startswith(
+        "Can only attach to existing executor. Got: <test_runner.Foo object"
+    )
+
+    with pytest.raises(TypeError) as ex:
+        await a.attach_value(foo, "str_with_num")
     assert str(ex.value).startswith(
         "Can only attach to existing executor. Got: <test_runner.Foo object"
     )
@@ -152,21 +167,22 @@ async def test_value_errors(mode: a.Mode) -> None:
 
     foo_exe = a.create(mode, Foo, 3, str_value="hello")
     exe_name = foo_exe.__class__.__name__
-    match mode:
-        case a.Mode.THREAD:
-            obj_name = "asyncrunner._ThreadExecutor"
-        case a.Mode.PROCESS | a.Mode.INTERPRETER:
-            obj_name = "test_runner.Foo"
-        case _:
-            raise AssertionError
 
     with pytest.raises(
-        ValueError, match=rf"Cannot set value to executor: <{obj_name} object"
+        TypeError,
+        match=rf"Can only set an executor attribute. Got: "
+        rf"<asyncrunner.{exe_name} object at",
     ):
+        # set_value type annotations cannot state that this is a typing error
+        # (see comment in code.)
         await a.set_value(foo_exe, 3)
 
-    foo = await a.get_value(foo_exe)
-    assert foo.num == 3
+    with pytest.raises(
+        TypeError,
+        match=rf"Can only get an executor attribute. Got: "
+        rf"<asyncrunner.{exe_name} object at",
+    ):
+        await a.get_value(foo_exe)
 
     with pytest.raises(
         AttributeError,
@@ -174,6 +190,14 @@ async def test_value_errors(mode: a.Mode) -> None:
         rf"<asyncrunner.{exe_name} object at",
     ):
         foo_exe.num = 7
+
+    # Python builtins and stdlib classes cannot be attached:
+    with pytest.raises(
+        TypeError,
+        match=r"descriptor 'append' for 'array.array' objects doesn't apply "
+        rf"to a '{exe_name}' object",
+    ):
+        await a.attach_object(foo_exe, "arr")
 
 
 @pytest.mark.asyncio
@@ -184,13 +208,15 @@ async def test_pickles(mode: a.Mode) -> None:
 
     foo_exe = a.create(mode, Foo, 3, str_value="hello")
 
-    await a.attach(foo_exe, "foo")
+    await a.attach_object(foo_exe, "foo")
     # Create a file handle that cannot be pickled:
     await a.run(foo_exe.foo.open_file, pathlib.Path("pyproject.toml"))
+    await a.attach_value(foo_exe.foo, "file")
     match mode:
         case a.Mode.THREAD:
-            foo = await a.get_value(foo_exe.foo)
-            assert foo.num == 2
+            file = await a.get_value(foo_exe.foo.file)
+            assert file is not None
+            assert file.name == "pyproject.toml"
         case a.Mode.PROCESS | a.Mode.INTERPRETER:
             pickle_error_message = (
                 "cannot pickle 'TextIOWrapper' instances"
@@ -198,7 +224,7 @@ async def test_pickles(mode: a.Mode) -> None:
                 else "object does not support cross-interpreter data"
             )
             with pytest.raises(TypeError, match=pickle_error_message):
-                await a.get_value(foo_exe.foo)
+                await a.get_value(foo_exe.foo.file)
         case _:
             raise AssertionError
 
@@ -207,14 +233,16 @@ async def test_pickles(mode: a.Mode) -> None:
     # This still does not prevent the exception:
     match mode:
         case a.Mode.THREAD:
-            foo = await a.get_value(foo_exe.foo)
-            assert foo.num == -77
+            file = await a.get_value(foo_exe.foo.file)
+            assert file is not None
+            assert file.name == "pyproject.toml"
         case a.Mode.PROCESS | a.Mode.INTERPRETER:
             with pytest.raises(TypeError, match=pickle_error_message):
-                await a.get_value(foo_exe.foo)
+                await a.get_value(foo_exe.foo.file)
         case _:
             raise AssertionError
     # For replace_foo to take effect, we need to re-attach foo:
-    await a.attach(foo_exe, "foo")
-    foo = await a.get_value(foo_exe.foo)
-    assert foo.num == -77
+    await a.attach_object(foo_exe, "foo")
+    await a.attach_value(foo_exe.foo, "file")
+    file = await a.get_value(foo_exe.foo.file)
+    assert file is None
