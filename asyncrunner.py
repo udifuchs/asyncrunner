@@ -15,8 +15,8 @@ class _Worker:
     """Worker handles the context for subprocess and interpreter Executors.
 
     Worker should be initialised with a class. An instance of this class is stored
-    as a class variable. This instance is global to the process/interperter, but since
-    since each Worker runs in its own subprocess/interperter,
+    as a class variable. This instance is global to the process/interpreter, but since
+    since each Worker runs in its own subprocess/interpreter,
     the instance is local to the Worker.
     """
 
