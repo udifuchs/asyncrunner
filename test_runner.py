@@ -127,6 +127,10 @@ async def test_type_errors() -> None:
     foo = Foo(3, "goodbye")
 
     with pytest.raises(TypeError) as ex:
+        await a.run(print)
+    assert str(ex.value) == "First argument must be a method."
+
+    with pytest.raises(TypeError) as ex:
         await a.run(foo.get_num)
     assert str(ex.value).startswith(
         "Can only run an executor method. Got: <test_runner.Foo object"

@@ -180,12 +180,12 @@ class _ThreadExecutorObject[T, **P](_ExecutorObject[T, P]):
         self,
         cls: Callable[P, T],
         name: str,
-        executor: concurrent.futures.Executor,
+        fexecutor: concurrent.futures.Executor,
         parent: object | None,
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> None:
-        super().__init__(cls, name, executor)
+        super().__init__(cls, name, fexecutor)
         self._parent = parent
         self._args = args
         self._kwargs = kwargs
@@ -240,13 +240,13 @@ class _ThreadExecutorValue[T, **P](_ExecutorValue[T, P]):
         self,
         cls: Callable[P, T],
         name: str,
-        executor: concurrent.futures.Executor,
+        fexecutor: concurrent.futures.Executor,
         parent: object,
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> None:
         cls2 = cast(type[T], cls)
-        super().__init__(cls2, name, executor)
+        super().__init__(cls2, name, fexecutor)
         self._parent = parent
         self._args = args
         self._kwargs = kwargs
@@ -264,7 +264,7 @@ class _ThreadExecutorValue[T, **P](_ExecutorValue[T, P]):
         return cast(T, ret_val)
 
 
-def create_thread[T, **P](
+def _create_thread[T, **P](
     klass: Callable[P, T], *args: P.args, **kwargs: P.kwargs
 ) -> T:
     """Create a thread executor with an instance of the specified class.
@@ -280,7 +280,7 @@ def create_thread[T, **P](
     return cast(T, exe_instance)
 
 
-def create_process[T, **P](
+def _create_process[T, **P](
     klass: Callable[P, T], *args: P.args, **kwargs: P.kwargs
 ) -> T:
     """Create a subprocess executor with an instance of the specified class.
@@ -301,7 +301,7 @@ def create_process[T, **P](
 
 if sys.version_info >= (3, 14):
 
-    def create_interpreter[T, **P](
+    def _create_interpreter[T, **P](
         klass: Callable[P, T], *args: P.args, **kwargs: P.kwargs
     ) -> T:
         """Create an interpreter executor with an instance of the specified class.
@@ -332,14 +332,29 @@ class Mode(enum.Enum):
 def create[T, **P](
     mode: Mode, klass: Callable[P, T], *args: P.args, **kwargs: P.kwargs
 ) -> T:
-    """Create an executor with an instance of the specified class."""
+    """Create an executor with an instance of the specified class.
+
+    The created executor would include all the method of that class.
+    The class will only be initiated when you tell it to run something.
+
+    Arguments:
+        mode:
+            Mode.THREAD:
+                Create a thread executor.
+            Mode.PROCESS:
+                Create a subprocess executor.
+            Mode.INTERPRETER:
+                Create an interpreter executor.
+        klass:
+            The class whose instance would be embedded in the executor.
+    """
     match mode:
         case Mode.THREAD:
-            return create_thread(klass, *args, **kwargs)
+            return _create_thread(klass, *args, **kwargs)
         case Mode.PROCESS:
-            return create_process(klass, *args, **kwargs)
+            return _create_process(klass, *args, **kwargs)
         case Mode.INTERPRETER:
-            return create_interpreter(klass, *args, **kwargs)
+            return _create_interpreter(klass, *args, **kwargs)
         case _:
             raise AssertionError
 
@@ -375,16 +390,17 @@ async def attach_value(instance: object, attr_name: str) -> None:
     await instance._attach_value(attr_name)
 
 
-async def run[T, **P](func: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
+async def run[T, **P](method: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
     """Run a method in an executor context."""
-    method = cast(types.MethodType, func)
+    if not isinstance(method, types.MethodType):
+        raise TypeError("First argument must be a method.")
     instance = method.__self__
     if not isinstance(instance, _ExecutorObject):
         raise TypeError(f"Can only run an executor method. Got: {instance!r}")
-    return await instance._run(func, *args, **kwargs)
+    return await instance._run(method, *args, **kwargs)
 
 
-# Type checkers cannot enforce that value could be assigned into attribute.
+# Type checkers cannot enforce that 'value' could be assigned into 'attribute'.
 # It might be possible one day using bound type, but currently PEP695 specifically
 # forbids this:
 # The specified upper bound type must be concrete. An attempt to use a generic
