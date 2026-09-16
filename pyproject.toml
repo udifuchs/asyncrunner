@@ -3,7 +3,7 @@ requires = [ "setuptools" ]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "asyncrunner"
+name = "asyncrunner-executor"
 description = "Run asynchronous object in an asynchronized context."
 authors = [
     { name = "Udi Fuchs", email = "udifuchs@gmail.com" },
