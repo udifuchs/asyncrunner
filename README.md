@@ -57,12 +57,12 @@ async def spam() -> None:
 
 The `a.create` routine returns an executor that encapsulates an instance of the `Foo` class.
 This executor has the same methods as the original instance (only `get_num` in this example).
-But these methods can only be accessed using the asynchronous `a.run` routine.
+But these methods can only be accessed using the asynchronous `a.run` coroutine.
 This guarantees that these methods would not block the event loop.
 
 Initially, the executor has access to the class methods, but not to the instance attributes
 (`self.num` and `self.bar` in this case).
-Instance attributes can be attached to the executor using the `a.attach_value` routine.
+Instance attributes can be attached to the executor using the `a.attach_value` coroutine.
 Then `a.set_value` and `a.get_value` can be used to access these attributes.
 
 Instance attributes can also be attached using `a.attach_object`.
@@ -75,7 +75,7 @@ The instance is created on the first `a.run`, `a.attach_object` or `a.attach_val
 The instance methods are always executed in the same dedicated thread.
 This reduces the chances of concurrency issues due to accessing the same data from different threads.
 This risk is not eliminated, since you can still pass containers as arguments or return values.
-These container will be shared between the main thread and the executor thread.
+These containers will be shared between the main thread and the executor thread.
 
 Instead of using threads to manage concurrency, it is possible to use a sub-process or a sub-interpreter, using `a.Mode.PROCESS` and `a.Mode.INTERPRETER` respectively.
 `asyncrunner` API is exactly the same for all these concurrency models.

@@ -366,7 +366,7 @@ async def attach_object(instance: object, attr_name: str) -> None:
     """Attach an object attribute to an executor.
 
     Object attributes are populated with its class methods.
-    These methods can be executed with the run routine.
+    These methods can be executed with the run coroutine.
     An object attribute can be further populated using attach_object and attach_value.
 
     The new attribute is another executor with the same context as the
@@ -380,7 +380,7 @@ async def attach_object(instance: object, attr_name: str) -> None:
 async def attach_value(instance: object, attr_name: str) -> None:
     """Attach a value attribute to an executor.
 
-    A value attribute can be accessed using the set_value and get_value routines.
+    A value attribute can be accessed using the set_value and get_value coroutines.
 
     The new attribute is another executor with the same context as the
     parent executor.
