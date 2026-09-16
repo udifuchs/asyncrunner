@@ -105,6 +105,6 @@ There are no external dependencies.
 
 History
 -------
-#### 0.1.0 (2026-09-xx)
+#### 0.1.0 (2026-09-15)
 
 * Initial release.
