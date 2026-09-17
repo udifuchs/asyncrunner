@@ -1,8 +1,9 @@
 # python cache:
 __pycache__
-# setuptools:
-/asyncrunner.egg-info/
+# setuptools, build:
+/asyncrunner_executor.egg-info/
 /build/
+/dist/
 # tox working folder:
 /.tox/
 # coverage data file:
